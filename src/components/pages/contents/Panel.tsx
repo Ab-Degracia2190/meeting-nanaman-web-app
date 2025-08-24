@@ -213,7 +213,7 @@ const Panel = () => {
               <Video className="w-6 h-6 text-orange-600 dark:text-orange-400" />
             </div>
             <h3 className="font-semibold text-black dark:text-white mb-2">HD Video & Audio</h3>
-            <p className="text-black/70 dark:text-white/70 text-sm">Crystal clear video calls with high-quality audio</p>
+            <p className="text-black/70 dark:text-white/70 text-sm">Malinaw camera tas audio nito pag may problema sayo na yon</p>
           </div>
           
           <div className="text-center">
@@ -221,7 +221,7 @@ const Panel = () => {
               <Users className="w-6 h-6 text-rose-600 dark:text-rose-400" />
             </div>
             <h3 className="font-semibold text-black dark:text-white mb-2">Multiple Participants</h3>
-            <p className="text-black/70 dark:text-white/70 text-sm">Connect with multiple people at once</p>
+            <p className="text-black/70 dark:text-white/70 text-sm">Pwede marami dito try nyo para maraming tanga</p>
           </div>
           
           <div className="text-center">
@@ -229,7 +229,7 @@ const Panel = () => {
               <Calendar className="w-6 h-6 text-amber-600 dark:text-amber-400" />
             </div>
             <h3 className="font-semibold text-black dark:text-white mb-2">Instant Meetings</h3>
-            <p className="text-black/70 dark:text-white/70 text-sm">Start meetings instantly or join with a link</p>
+            <p className="text-black/70 dark:text-white/70 text-sm">Start meetings instantly or join with a link try nyo</p>
           </div>
         </div>
       </div>
