@@ -1,12 +1,13 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Video, Plus, Calendar, Users, ArrowRight, Copy, Check } from 'lucide-react';
+import { Video, Plus, Calendar, Users, ArrowRight } from 'lucide-react';
 import { apiService } from '@/base/services';
 import AnimatedBackground from '@/components/partials/background/Animated';
 import TextInput from '@/components/partials/inputs/Text';
 import PrimaryButton from '@/components/partials/buttons/Primary';
 import ThemeToggle from '@/components/partials/buttons/ThemeToggle';
 import NotFoundModal from '@/components/pages/errors/modals/404';
+import ShareVia from '@/components/pages/contents/layouts/ShareVia';
 
 const Panel = () => {
   const navigate = useNavigate();
@@ -14,7 +15,6 @@ const Panel = () => {
   const [joinRoomId, setJoinRoomId] = useState('');
   const [isJoining, setIsJoining] = useState(false);
   const [recentMeeting, setRecentMeeting] = useState<string | null>(null);
-  const [linkCopied, setLinkCopied] = useState(false);
   const [showNotFoundModal, setShowNotFoundModal] = useState(false);
 
   const createNewMeeting = async () => {
@@ -53,16 +53,6 @@ const Panel = () => {
       setShowNotFoundModal(true);
     } finally {
       setIsJoining(false);
-    }
-  };
-
-  const copyLink = async (link: string) => {
-    try {
-      await navigator.clipboard.writeText(link);
-      setLinkCopied(true);
-      setTimeout(() => setLinkCopied(false), 2000);
-    } catch (error) {
-      console.error('Failed to copy link:', error);
     }
   };
 
@@ -155,51 +145,9 @@ const Panel = () => {
           </div>
         </div>
 
+        {/* New QR Code Section */}
         {recentMeeting && (
-          <div className="bg-white/80 dark:bg-gray-800/80 backdrop-blur-md rounded-2xl p-6 shadow-lg border border-white/20 dark:border-gray-700/20 mb-12">
-            <div className="flex items-center justify-between">
-              <div className="flex-1 w-full">
-                <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
-                  Oh bobo ito na meeting link mo
-                </h4>
-                <div className="flex items-center gap-3 w-full">
-                  <code className="text-[10px] md:text-xs bg-gray-100/80 dark:bg-gray-700/80 px-3 py-2 rounded-lg font-mono text-gray-700 dark:text-gray-300 flex-1 truncate">
-                    {recentMeeting}
-                  </code>
-
-                  <div className="relative group">
-                    <PrimaryButton
-                      onClick={() => copyLink(recentMeeting)}
-                      className="!w-auto !px-3 !py-2 flex items-center justify-center bg-gray-100/80 dark:bg-gray-700/80 hover:bg-gray-200/80 dark:hover:bg-gray-600/80 text-gray-700 dark:text-gray-300 rounded-lg transition-colors"
-                    >
-                      {linkCopied ? (
-                        <Check className="w-4 h-4 text-green-600" />
-                      ) : (
-                        <Copy className="w-4 h-4" />
-                      )}
-                    </PrimaryButton>
-                    <span className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-1 text-xs text-white bg-gray-800 dark:bg-gray-600 rounded opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none">
-                      Copy meeting link
-                    </span>
-                  </div>
-
-                  <div className="relative group">
-                    <PrimaryButton
-                      onClick={() =>
-                        navigate(recentMeeting.split(window.location.origin)[1])
-                      }
-                      className="!w-auto !px-3 !py-2 flex items-center justify-center"
-                    >
-                      <ArrowRight className="w-4 h-4 text-white" />
-                    </PrimaryButton>
-                    <span className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-1 text-xs text-white bg-gray-800 dark:bg-gray-600 rounded opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none">
-                      Join this meeting
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
+          <ShareVia meetingLink={recentMeeting} />
         )}
 
         <NotFoundModal
