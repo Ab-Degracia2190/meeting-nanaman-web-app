@@ -1,34 +1,58 @@
-import { lazy, Suspense } from "react";
-import { createBrowserRouter, Navigate } from "react-router-dom";
-import PrimaryLoader from "@/components/partials/loaders/Primary";
+import { createBrowserRouter, RouterProvider, Outlet } from 'react-router-dom';
+import { AuthProvider } from '@/components/pages/contents/home/auth/provider';
+import HomePage from '@/components/pages/contents/home/index';
+import SignIn from '@/components/pages/contents/home/auth/sign-in';
+import OAuthCallback from '@/components/pages/contents/home/auth/callback';
+import VideoCallRoom from '@/components/pages/contents/home/layouts/meetings/meeting-room';
+import NotFound from '@/components/pages/errors/404';
 
-const NotFound = lazy(() => import("@/components/pages/errors/404"));
-const Panel = lazy(() => import("@/components/pages/contents/Panel"));
-const VideoCallRoom = lazy(() => import("@/components/pages/contents/room/VideoCallRoom"));
+// Root layout component that provides AuthProvider context
+const RootLayout = () => {
+  return (
+    <AuthProvider>
+      <Outlet />
+    </AuthProvider>
+  );
+};
 
-const LoaderFallback = () => (
-    <div className="flex justify-center items-center h-screen w-full">
-        <PrimaryLoader overlay />
-    </div>
-);
-
-const routes = createBrowserRouter([
-    { 
-        path: "/", 
-        element: <Suspense fallback={<LoaderFallback />}><Panel /></Suspense> 
-    },
-    { 
-        path: "/room/:roomId", 
-        element: <Suspense fallback={<LoaderFallback />}><VideoCallRoom /></Suspense> 
-    },
-    { 
-        path: "/not-found", 
-        element: <Suspense fallback={<LoaderFallback />}><NotFound /></Suspense> 
-    },
-    { 
-        path: "*", 
-        element: <Navigate to="/not-found" replace /> 
-    },
+// Create router configuration
+const router = createBrowserRouter([
+  {
+    path: "/",
+    element: <RootLayout />,
+    errorElement: <NotFound />,
+    children: [
+      {
+        index: true,
+        element: <HomePage />,
+      },
+      {
+        path: "sign-in",
+        element: <SignIn />,
+      },
+      {
+        path: "auth/google/callback",
+        element: <OAuthCallback />,
+      },
+      {
+        path: "room/:roomId",
+        element: <VideoCallRoom />,
+      },
+      {
+        path: "not-found",
+        element: <NotFound />,
+      },
+      {
+        path: "*",
+        element: <NotFound />,
+      },
+    ],
+  },
 ]);
 
-export default routes;
+const AppRoutes = () => {
+  return <RouterProvider router={router} />;
+};
+
+export default AppRoutes;
+export { router };

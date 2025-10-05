@@ -1,27 +1,24 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import VideoPlayer from '@/components/pages/contents/layouts/VideoPlayer';
-import MeetingControls from '@/components/pages/contents/layouts/MeetingControls';
-import ParticipantsPanel from '@/components/pages/contents/layouts/ParticipantsPanel';
-import ChatPanel, { ChatMessage } from '@/components/pages/contents/layouts/ChatPanel';
-import BackgroundFilters from '@/components/pages/contents/layouts/BackgroundFilters';
-import EmojiReactionPanel from '@/components/pages/contents/layouts/EmojiReactionPanel';
+import { useAuth } from '@/components/pages/contents/home/auth/provider';
+import VideoPlayer from '@/components/pages/contents/home/layouts/meetings/controls-panel/video-player';
+import MeetingControls from '@/components/pages/contents/home/layouts/meetings/controls-panel/meeting-controls';
+import ParticipantsPanel from '@/components/pages/contents/home/layouts/meetings/controls-panel/participants';
+import ChatPanel, { ChatMessage } from '@/components/pages/contents/home/layouts/meetings/controls-panel/chat';
+import BackgroundFilters from '@/components/pages/contents/home/layouts/meetings/controls-panel/background-filter';
+import EmojiReactionPanel from '@/components/pages/contents/home/layouts/meetings/controls-panel/emoji-reaction';
 import AnimatedBackground from '@/components/partials/background/Animated';
 import ThemeToggle from '@/components/partials/buttons/ThemeToggle';
-import { useVideoCall } from '@/base/hooks';
-import { useTheme } from '@/base/hooks/useTheme';
-import { apiService } from '@/base/services';
-import TextInput from '@/components/partials/inputs/Text';
 import PrimaryButton from '@/components/partials/buttons/Primary';
+import { useVideoCall } from '@/base/hooks';
+import { apiService } from '@/base/services';
 import { v4 as uuidv4 } from 'uuid';
 
 const VideoCallRoom = () => {
   const { roomId } = useParams<{ roomId: string }>();
   const navigate = useNavigate();
-  const { isDark } = useTheme();
-  const [userName, setUserName] = useState('');
+  const { isAuthenticated, user, signIn, isLoading } = useAuth();
   const [isJoining, setIsJoining] = useState(false);
-  const [showJoinForm, setShowJoinForm] = useState(true);
   const [showParticipants, setShowParticipants] = useState(false);
   const [showChat, setShowChat] = useState(false);
   const [showBackgroundFilters, setShowBackgroundFilters] = useState(false);
@@ -33,6 +30,10 @@ const VideoCallRoom = () => {
   const [backgroundFilter, setBackgroundFilter] = useState('none');
 
   const videoCall = useVideoCall(roomId || '');
+  
+  // CRITICAL: Track if we've already joined to prevent duplicate joins
+  const hasJoinedRef = useRef(false);
+  const isRequestingMediaRef = useRef(false);
 
   // Helper function to get responsive grid classes
   const getResponsiveGridClasses = (totalParticipants: number) => {
@@ -56,11 +57,9 @@ const VideoCallRoom = () => {
       return 'grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-3 xl:grid-cols-3 xl:grid-rows-3';
     }
     
-    // For more than 9 participants
     return 'grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-4';
   };
 
-  // Helper function to get individual video container classes
   const getVideoContainerClasses = (totalParticipants: number) => {
     const baseClasses = 'w-full rounded-lg overflow-hidden';
     
@@ -80,7 +79,6 @@ const VideoCallRoom = () => {
       return `${baseClasses} aspect-video h-auto min-h-[120px] sm:min-h-[150px] lg:min-h-[200px]`;
     }
     
-    // For more participants, use smaller containers
     return `${baseClasses} aspect-video h-auto min-h-[100px] sm:min-h-[120px] lg:min-h-[150px]`;
   };
 
@@ -107,32 +105,77 @@ const VideoCallRoom = () => {
     checkRoom();
   }, [roomId, navigate]);
 
-  // Request camera and microphone permissions on mount
+  // CRITICAL: Request permissions only once when authenticated
   useEffect(() => {
     const requestPermissions = async () => {
+      if (!isAuthenticated || isRequestingMediaRef.current || permissionGranted) {
+        return;
+      }
+
+      isRequestingMediaRef.current = true;
+      console.log('[Meeting] Requesting media permissions...');
+
       try {
         await videoCall.getMediaStream(true, true);
+        console.log('[Meeting] Media permissions granted');
         setPermissionGranted(true);
       } catch (error) {
-        console.error('Failed to get media permissions:', error);
+        console.error('[Meeting] Failed to get media permissions:', error);
         setPermissionGranted(false);
+      } finally {
+        isRequestingMediaRef.current = false;
       }
     };
 
     requestPermissions();
-  }, []);
+  }, [isAuthenticated, videoCall, permissionGranted]);
+
+  // CRITICAL: Auto-join room only once when all conditions are met
+  useEffect(() => {
+    const autoJoin = async () => {
+      if (
+        !isAuthenticated || 
+        !user || 
+        !permissionGranted || 
+        !roomExists || 
+        videoCall.isJoined ||
+        hasJoinedRef.current
+      ) {
+        return;
+      }
+
+      hasJoinedRef.current = true;
+      setIsJoining(true);
+      console.log('[Meeting] Auto-joining room as:', user.name);
+
+      try {
+        // CRITICAL: Small delay to ensure media stream is fully ready
+        await new Promise(resolve => setTimeout(resolve, 500));
+        await videoCall.joinRoom(user.name);
+        console.log('[Meeting] Successfully joined room');
+      } catch (error) {
+        console.error('[Meeting] Failed to join room:', error);
+        hasJoinedRef.current = false;
+      } finally {
+        setIsJoining(false);
+      }
+    };
+
+    autoJoin();
+  }, [isAuthenticated, user, permissionGranted, roomExists, videoCall.isJoined]);
 
   // Socket event handlers for chat
   useEffect(() => {
     if (!videoCall.socket) return;
 
-    videoCall.socket.on('chat-message', (data: {
+    const handleChatMessage = (data: {
       id: string;
       userId: string;
       userName: string;
       message: string;
       timestamp: string;
     }) => {
+      console.log('[Meeting] Received chat message:', data);
       const newMessage: ChatMessage = {
         ...data,
         timestamp: new Date(data.timestamp)
@@ -140,14 +183,15 @@ const VideoCallRoom = () => {
       
       setMessages(prev => [...prev, newMessage]);
       
-      // Increment unread messages if chat is closed
       if (!showChat) {
         setUnreadMessages(prev => prev + 1);
       }
-    });
+    };
+
+    videoCall.socket.on('chat-message', handleChatMessage);
 
     return () => {
-      videoCall.socket?.off('chat-message');
+      videoCall.socket?.off('chat-message', handleChatMessage);
     };
   }, [videoCall.socket, showChat]);
 
@@ -158,29 +202,15 @@ const VideoCallRoom = () => {
     }
   }, [showChat]);
 
-  const handleJoinRoom = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!userName.trim() || !roomId || !permissionGranted) return;
-
-    setIsJoining(true);
-    try {
-      await videoCall.joinRoom(userName.trim());
-      setShowJoinForm(false);
-    } catch (error) {
-      console.error('Failed to join room:', error);
-    } finally {
-      setIsJoining(false);
-    }
-  };
-
   const handleLeaveCall = () => {
+    console.log('[Meeting] Leaving call');
+    hasJoinedRef.current = false;
     videoCall.leaveRoom();
     navigate('/');
   };
 
   const toggleParticipants = () => {
     setShowParticipants(!showParticipants);
-    // Close other panels
     setShowChat(false);
     setShowBackgroundFilters(false);
     setShowEmojiReactions(false);
@@ -188,11 +218,9 @@ const VideoCallRoom = () => {
 
   const toggleChat = () => {
     setShowChat(!showChat);
-    // Close other panels
     setShowParticipants(false);
     setShowBackgroundFilters(false);
     setShowEmojiReactions(false);
-    // Reset unread messages
     if (!showChat) {
       setUnreadMessages(0);
     }
@@ -200,7 +228,6 @@ const VideoCallRoom = () => {
 
   const toggleBackgroundFilters = () => {
     setShowBackgroundFilters(!showBackgroundFilters);
-    // Close other panels
     setShowParticipants(false);
     setShowChat(false);
     setShowEmojiReactions(false);
@@ -208,7 +235,6 @@ const VideoCallRoom = () => {
 
   const toggleEmojiReactions = () => {
     setShowEmojiReactions(!showEmojiReactions);
-    // Close other panels
     setShowParticipants(false);
     setShowChat(false);
     setShowBackgroundFilters(false);
@@ -225,9 +251,9 @@ const VideoCallRoom = () => {
         timestamp: new Date().toISOString()
       };
 
+      console.log('[Meeting] Sending chat message:', messageData);
       videoCall.socket.emit('chat-message', messageData);
       
-      // Add message locally immediately
       setMessages(prev => [...prev, {
         ...messageData,
         timestamp: new Date(messageData.timestamp)
@@ -243,33 +269,25 @@ const VideoCallRoom = () => {
     videoCall.sendReaction(emoji);
   };
 
-  // Show loading while checking room existence
-  if (roomExists === null) {
+  // Show loading while checking authentication and room existence
+  if (isLoading || roomExists === null) {
     return (
       <div className="min-h-screen relative bg-white dark:bg-gray-900 transition-colors">
         <AnimatedBackground />
         <div className="relative z-10 min-h-screen flex items-center justify-center">
           <div className="text-center">
-            <svg className="w-10 h-10 animate-spin mx-auto mb-4" viewBox="0 0 40 40" height="40" width="40">
-              <circle className="track" cx="20" cy="20" r="17.5" pathLength="100" strokeWidth="5" fill="none"
-                  style={{ stroke: isDark ? "white" : "black", opacity: 0.1 }} />
-              <circle className="car" cx="20" cy="20" r="17.5" pathLength="100" strokeWidth="5" fill="none"
-                  style={{
-                      stroke: isDark ? "white" : "black",
-                      strokeDasharray: "25, 75",
-                      strokeDashoffset: 0,
-                      strokeLinecap: "round"
-                  }} />
-            </svg>
-            <p className="text-black dark:text-white font-medium">Checking meeting room...</p>
+            <div className="w-10 h-10 border-4 border-rose-200 dark:border-rose-800 border-t-rose-600 dark:border-t-rose-400 rounded-full animate-spin mx-auto mb-4"></div>
+            <p className="text-black dark:text-white font-medium">
+              {isLoading ? 'Checking authentication...' : 'Checking meeting room...'}
+            </p>
           </div>
         </div>
       </div>
     );
   }
 
-  // Show join form
-  if (showJoinForm) {
+  // Show sign in requirement
+  if (!isAuthenticated) {
     return (
       <div className="min-h-screen relative bg-white dark:bg-gray-900 transition-colors">
         <AnimatedBackground />
@@ -285,45 +303,51 @@ const VideoCallRoom = () => {
                     <span className="text-white text-sm md:text-lg font-semibold">MEETING NANAMAN SHET!</span>
                   </div>
                   <h1 className="text-xl md:text-2xl font-bold text-gray-900 dark:text-white mb-2">
-                    Salihan ang mga tanga
+                    Sign In Required
                   </h1>
                   <p className="text-xs md:text-sm text-gray-600 dark:text-gray-300">
-                    Enter your name para tanga kana din
+                    You need to sign in with Google to join this meeting
                   </p>
-                  {!permissionGranted && (
-                    <p className="text-red-600 dark:text-red-400 text-[10px] md:text-xs mt-2">
-                      Allow mo camera tas microphone bobo
-                    </p>
-                  )}
                 </div>
 
-                <form onSubmit={handleJoinRoom} className="space-y-2">
-                  <TextInput
-                    label="Username"
-                    placeholder="Enter your name here..."
-                    value={userName}
-                    onChange={(e) => setUserName(e.target.value)}
-                    required
-                    disabled={isJoining || !permissionGranted}
-                  />
+                <PrimaryButton
+                  onClick={() => signIn(roomId)}
+                  className="text-xs md:text-sm mb-4"
+                >
+                  Sign In with Google
+                </PrimaryButton>
 
-                  <PrimaryButton
-                    type="submit"
-                    className='text-xs md:text-sm'
-                    disabled={isJoining || !userName.trim() || !permissionGranted}
-                    loading={isJoining}
-                  >
-                    {isJoining ? 'Joining...' : 'Join Now'}
-                  </PrimaryButton>
-                </form>
-
-                {videoCall.error && (
-                  <div className="mt-4 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
-                    <p className="text-red-700 dark:text-red-400 text-[10px] md:text-xs">{videoCall.error}</p>
-                  </div>
-                )}
+                <button
+                  onClick={() => navigate('/')}
+                  className="w-full text-xs md:text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors"
+                >
+                  Back to Home
+                </button>
               </div>
             </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Show joining state
+  if (isJoining || !permissionGranted || !videoCall.isJoined) {
+    return (
+      <div className="min-h-screen relative bg-white dark:bg-gray-900 transition-colors">
+        <AnimatedBackground />
+        <div className="absolute top-4 right-4 z-20">
+          <ThemeToggle />
+        </div>
+        <div className="relative z-10 min-h-screen flex items-center justify-center">
+          <div className="text-center">
+            <div className="w-10 h-10 border-4 border-rose-200 dark:border-rose-800 border-t-rose-600 dark:border-t-rose-400 rounded-full animate-spin mx-auto mb-4"></div>
+            <p className="text-black dark:text-white font-medium">
+              {!permissionGranted ? 'Requesting camera and microphone access...' : 'Joining meeting...'}
+            </p>
+            <p className="text-sm text-gray-600 dark:text-gray-400 mt-2">
+              {!permissionGranted ? 'Please allow access to continue' : 'Please wait...'}
+            </p>
           </div>
         </div>
       </div>
@@ -340,10 +364,9 @@ const VideoCallRoom = () => {
     <div className="min-h-screen relative bg-white dark:bg-gray-900 transition-colors">
       <AnimatedBackground />
       
-      {/* Main video grid - Improved responsive layout */}
+      {/* Main video grid */}
       <div className="relative z-10 min-h-screen p-2 sm:p-4">
         <div className="h-full max-h-screen overflow-auto">
-          {/* Video grid container */}
           <div className={`
             grid gap-2 sm:gap-4 
             ${gridClasses}
@@ -353,7 +376,7 @@ const VideoCallRoom = () => {
           `}>
             {/* Local video */}
             {videoCall.currentUser && (
-              <div className={videoContainerClasses}>
+              <div className={videoContainerClasses} key={`local-${videoCall.currentUser.id}`}>
                 <VideoPlayer
                   stream={videoCall.stream}
                   user={videoCall.currentUser}
@@ -370,7 +393,7 @@ const VideoCallRoom = () => {
               .map((user) => {
                 const remoteStream = videoCall.remoteStreams.get(user.socketId);
                 return (
-                  <div key={user.id} className={videoContainerClasses}>
+                  <div key={`remote-${user.id}`} className={videoContainerClasses}>
                     <VideoPlayer
                       stream={remoteStream}
                       user={user}
@@ -384,7 +407,7 @@ const VideoCallRoom = () => {
         </div>
       </div>
 
-      {/* Meeting header info - Mobile responsive */}
+      {/* Meeting header */}
       <div className="absolute top-2 sm:top-4 left-2 sm:left-4 bg-black/50 text-white px-2 sm:px-4 py-1 sm:py-2 rounded-lg backdrop-blur-sm z-20">
         <div className="flex items-center gap-2 sm:gap-3">
           <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></div>
@@ -394,7 +417,21 @@ const VideoCallRoom = () => {
         </div>
       </div>
 
-      {/* Theme toggle in meeting */}
+      {/* User info */}
+      <div className="absolute top-2 sm:top-4 right-16 sm:right-20 bg-black/50 text-white px-2 sm:px-3 py-1 sm:py-2 rounded-lg backdrop-blur-sm z-20">
+        <div className="flex items-center gap-2">
+          <img 
+            src={user?.picture} 
+            alt={user?.name}
+            className="w-6 h-6 rounded-full"
+          />
+          <span className="text-xs sm:text-sm font-medium hidden sm:block">
+            {user?.name}
+          </span>
+        </div>
+      </div>
+
+      {/* Theme toggle */}
       <div className="absolute top-2 sm:top-4 right-2 sm:right-4 z-20">
         <ThemeToggle />
       </div>
@@ -437,7 +474,7 @@ const VideoCallRoom = () => {
         />
       )}
 
-      {/* Participants panel */}
+      {/* Panels */}
       <ParticipantsPanel
         users={videoCall.users}
         currentUser={videoCall.currentUser}
@@ -445,7 +482,6 @@ const VideoCallRoom = () => {
         onClose={() => setShowParticipants(false)}
       />
 
-      {/* Chat panel */}
       <ChatPanel
         users={videoCall.users}
         currentUser={videoCall.currentUser}
@@ -455,7 +491,6 @@ const VideoCallRoom = () => {
         messages={messages}
       />
 
-      {/* Background filters */}
       <BackgroundFilters
         isOpen={showBackgroundFilters}
         onClose={() => setShowBackgroundFilters(false)}
@@ -463,7 +498,6 @@ const VideoCallRoom = () => {
         currentBackground={backgroundFilter}
       />
 
-      {/* Emoji Reactions */}
       <EmojiReactionPanel
         isOpen={showEmojiReactions}
         onClose={() => setShowEmojiReactions(false)}
